@@ -344,7 +344,7 @@ class SystemStatsCollectorCog(commands.Cog, name="System Statistics Collector"):
         num = 10 / 60 * 60 * 24 * 7
         self.stats = deque(maxlen=round(num))
 
-    @tasks.loop(seconds=10.0)
+    @tasks.loop(minutes=5.0)
     async def collect_stats(self):
         LOGGER.debug("Running collect system stats task loop ...")
 

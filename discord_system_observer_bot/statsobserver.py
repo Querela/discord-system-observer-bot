@@ -96,35 +96,33 @@ def plot_rows(data_series, as_data_uri=True):
 
     # pylint: enable=import-outside-toplevel
 
+    meta_series = [ds for ds in data_series if ds[0].startswith("_")]
+    data_series = [ds for ds in data_series if not ds[0].startswith("_")]
+
     # how many subplots
-    nrows = len([n for n, _ in data_series if not n.startswith("_")])
+    nrows = len(data_series)
+    ncols = 2
 
     # shared x-axis
     x = [  # pylint: disable=invalid-name
         datetime.datetime.utcfromtimestamp(v)
-        for n, vs in data_series
+        for n, vs in meta_series
         if n == "_datetime"
         for v in vs
     ]
     # alternative numeric x-labels
-    # x = [vs for n, vs in data_series if n == "_id"][0]  # pylint: disable=invalid-name
+    # x = [vs for n, vs in meta_series if n == "_id"][0]  # pylint: disable=invalid-name
 
     # plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d %H:%M"))
     # plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
 
-    # fig, axes = plt.subplots(round(nrows / 2), 2, sharex=True, figsize=(8, 10))
+    # fig, axes = plt.subplots(int((nrows + ncols - 1) / ncols), ncols, sharex=True, figsize=(8, 10))
     fig = plt.figure(figsize=(8, 10))
     # how many rows / columns, round up
-    plt_layout_fmt = (round(nrows / 2), 2)
+    plt_layout_fmt = (int((nrows + ncols - 1) / ncols), ncols)
 
     # plot series
-    axis_nr = 0
-    for name, series in data_series:
-        # skip meta series
-        if name.startswith("_"):
-            continue
-
-        axis_nr += 1
+    for axis_nr, (name, series) in enumerate(data_series, 1):
         # get current plot
         ax = fig.add_subplot(*(plt_layout_fmt + (axis_nr,)))
         # plot
@@ -155,6 +153,7 @@ def plot_rows(data_series, as_data_uri=True):
     bbuf = BytesIO()
     # https://matplotlib.org/3.1.1/api/_as_gen/matplotlib.pyplot.savefig.html
     fig.savefig(bbuf, format="png")
+
     if as_data_uri:
         data_uri = f"data:image/png;base64,{b64encode(bbuf.getvalue()).decode()}"
         return data_uri

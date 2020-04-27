@@ -88,7 +88,7 @@ class SelfOrAllName:
     @classmethod
     async def convert(cls, ctx, argument):  # pylint: disable=unused-argument
         if argument not in ("*", get_local_machine_name()):
-            raise commands.BadArgument()
+            raise commands.BadArgument("Not the local machine name or wildcard!")
         return cls(argument)
 
     @property
@@ -202,6 +202,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
     # TODO: cooldown
 
     @observer_cmd.command(name="start")
+    @commands.cooldown(1.0, 10.0)
     async def observer_start(self, ctx):
         """Starts the background system observer loop."""
         # NOTE: check for is_running() only added in version 1.4.0
@@ -213,6 +214,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
             await ctx.send("Observer restarted")
 
     @observer_cmd.command(name="stop")
+    @commands.cooldown(1.0, 10.0)
     async def observer_stop(self, ctx):
         """Stops the background system observer."""
         self.observe_system.cancel()  # pylint: disable=no-member
@@ -220,6 +222,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         await ctx.send("Observer stopped")
 
     @observer_cmd.command(name="status")
+    @commands.cooldown(1.0, 10.0)
     async def observer_status(self, ctx):
         """Displays statistics about notifications etc."""
 
@@ -259,7 +262,66 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
 
         await ctx.send(message)
 
-    # TODO: current limit + badness output
+    @observer_cmd.command(name="dump-badness")
+    @commands.cooldown(1.0, 10.0)
+    async def observer_dump_badness(self, ctx):
+        """Dump current badness values."""
+
+        if not self.bad_checker.bad_counters:
+            await ctx.send(f"N/A [`{self.local_machine_name}`] [`not-started`]")
+            return
+
+        len_keys = max(len(k) for k in self.bad_checker.bad_counters.keys())
+        len_vals = max(
+            len(str(v))
+            for v in self.bad_checker.bad_counters.values()
+            if isinstance(v, (int, float, bool))
+        )
+
+        message = "".join(
+            [
+                f"**Badness values for** `{self.local_machine_name}`",
+                f""" [`{"running" if self.observe_system.next_iteration is not None else "stopped"}`]""",  # pylint: disable=no-member
+                "\n```\n",
+                "\n".join(
+                    [
+                        f"{k:<{len_keys}} {v:>{len_vals}}"
+                        for k, v in self.bad_checker.bad_counters.items()
+                    ]
+                ),
+                "\n```",
+            ]
+        )
+
+        await ctx.send(message)
+
+    @observer_cmd.command(name="dump-limits")
+    @commands.cooldown(1.0, 10.0)
+    async def observer_dump_limits(self, ctx):
+        """Write out limits."""
+
+        len_keys = max(len(k) for k in self.limits.keys())
+        len_vals = 10
+
+        message = "".join(
+            [
+                f"**Limits for** `{self.local_machine_name}`",
+                f""" [`{"running" if self.observe_system.next_iteration is not None else "stopped"}`]""",  # pylint: disable=no-member
+                "\n```\n",
+                f"""{"name":<{len_keys}} {"threshold":>{len_vals}} {"exceed?":>{len_vals}} {"notified":>{len_vals}}\n""",
+                "\n".join(
+                    [
+                        f"{k:<{len_keys}} {v.threshold:>{len_vals}} "
+                        f"{str(self.bad_checker.threshold_reached(k, v)):>{len_vals}} "
+                        f"{str(self.bad_checker.notified[k]):>{len_vals}}"
+                        for k, v in self.limits.items()
+                    ]
+                ),
+                "\n```",
+            ]
+        )
+
+        await ctx.send(message)
 
 
 def run_observer(token, channel_id):

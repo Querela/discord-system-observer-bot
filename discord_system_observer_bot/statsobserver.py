@@ -1,7 +1,8 @@
 import datetime
+from base64 import b64encode
 from collections import defaultdict, namedtuple
 from functools import lru_cache, partial
-
+from io import BytesIO
 
 from discord_system_observer_bot.gpuinfo import get_gpus
 from discord_system_observer_bot.sysinfo import (
@@ -88,17 +89,14 @@ def plot_rows(data_series, as_data_uri=True):
     if not has_extra_deps_plot():
         return None
 
-    # pylint: disable=import-outside-toplevel,unused-import
+    # pylint: disable=import-outside-toplevel
 
-    from base64 import b64encode
-    from io import BytesIO
-
-    import matplotlib.dates as mdates
+    # import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
-    import numpy as np
 
-    # pylint: enable=import-outside-toplevel,unused-import
+    # pylint: enable=import-outside-toplevel
 
+    # how many subplots
     nrows = len([n for n, _ in data_series if not n.startswith("_")])
 
     # shared x-axis
@@ -108,26 +106,50 @@ def plot_rows(data_series, as_data_uri=True):
         if n == "_datetime"
         for v in vs
     ]
-    x = [vs for n, vs in data_series if n == "_id"][0]  # pylint: disable=invalid-name
+    # alternative numeric x-labels
+    # x = [vs for n, vs in data_series if n == "_id"][0]  # pylint: disable=invalid-name
 
-    # plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+    # plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d %H:%M"))
     # plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
 
-    fig, axes = plt.subplots(nrows, sharex=True, figsize=(4, 8))
+    # fig, axes = plt.subplots(round(nrows / 2), 2, sharex=True, figsize=(8, 10))
+    fig = plt.figure(figsize=(8, 10))
+    # how many rows / columns, round up
+    plt_layout_fmt = (round(nrows / 2), 2)
 
     # plot series
-    ai = -1  # pylint: disable=invalid-name
+    axis_nr = 0
     for name, series in data_series:
+        # skip meta series
         if name.startswith("_"):
             continue
-        ai += 1  # pylint: disable=invalid-name
-        ax = axes[ai]  # pylint: disable=invalid-name
-        ax.plot(x, series)
-        # ax.set(ylabel=name)
-        ax.set_title(name)
-        ax.label_outer()
 
-    # plt.gcf().autofmt_xdate()
+        axis_nr += 1
+        # get current plot
+        ax = fig.add_subplot(*(plt_layout_fmt + (axis_nr,)))
+        # plot
+        ax.plot(x, series)
+        # set plot title
+        ax.set_title(name)
+
+    for axis_nr, ax in enumerate(fig.axes, 1):
+        # set x-axis to start with 0
+        # ax.set_xlim(left=0, right=len(x))
+
+        # disable inner x-axis labels
+        # ax.label_outer()
+        # if not ax.is_last_row():
+        # if axis_nr not in (nrows, nrows - 1):
+        #    print(ax.get_title())
+        #    for label in ax.get_xticklabels(which="both"):
+        #        label.set_visible(False)
+        #    ax.get_xaxis().get_offset_text().set_visible(False)
+        #    ax.set_xlabel("")
+        pass
+
+    plt.gcf().autofmt_xdate()
+
+    plt.tight_layout()
 
     # serialize result
     bbuf = BytesIO()
@@ -283,10 +305,10 @@ def make_observable_limits():
         fn_check=lambda cur, thres: cur < thres,
         threshold=95.0,
         message="**CPU Load Avg [5min]** is too high! (value: `{cur_value}%`, threshold: `{threshold})`",
-        # increase badness level by 1
-        badness_inc=1,
-        # notify, when badness counter reached 3
-        badness_threshold=3,
+        # increase badness level by 2
+        badness_inc=2,
+        # notify, when badness counter reached 6
+        badness_threshold=6,
     )
     limits["mem_util"] = ObservableLimit(
         name="Memory-Utilisation",

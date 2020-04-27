@@ -1,12 +1,16 @@
 import datetime
 import logging
 import typing
-from collections import defaultdict
+from collections import defaultdict, deque
+from io import BytesIO
 
 import discord
 from discord.ext import commands, tasks
 
 from discord_system_observer_bot.gpuinfo import get_gpu_info
+from discord_system_observer_bot.statsobserver import collect_stats as _collect_stats
+from discord_system_observer_bot.statsobserver import stats2rows
+from discord_system_observer_bot.statsobserver import plot_rows
 from discord_system_observer_bot.statsobserver import has_extra_deps_gpu
 from discord_system_observer_bot.statsobserver import make_observable_limits
 from discord_system_observer_bot.statsobserver import NotifyBadCounterManager
@@ -99,6 +103,9 @@ class SelfOrAllName:
         return self._name
 
 
+# ---------------------------------------------------------------------------
+
+
 class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
     def __init__(self, bot, channel_id):
         self.bot = bot
@@ -152,7 +159,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
                 # even if shortly recovered but not completely, e. g. 3->2->3 >= 3 (thres) <= 0 (not completely reset)
                 await self.send(
                     limit.message.format(cur_value=cur_value, threshold=limit.threshold)
-                    + f" `@{self.local_machine_name}`"
+                    + f" @`{self.local_machine_name}`"
                 )
                 self.bad_checker.mark_notified(name)
                 self.stats["num_limits_notified"] += 1
@@ -160,7 +167,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
             if self.bad_checker.decrease_counter(name):
                 # get one-time True if changed from non-normal to normal
                 await self.send(
-                    f"*{limit.name} has recovered*" f" `@{self.local_machine_name}`"
+                    f"*{limit.name} has recovered*" f" @`{self.local_machine_name}`"
                 )
                 self.stats["num_normal_notified"] += 1
 
@@ -181,7 +188,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
     async def observer_cmd(
         self, ctx, name: typing.Optional[SelfOrAllName] = SelfOrAllName("*"),
     ):
-        """Observer management commands, like start/stop/status ...
+        """Management commands, like start/stop/status ...
 
         Optionally supply the name of the local machine to filter
         command execution. Beware for machine names that are the
@@ -199,8 +206,6 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         # did not observe any calls to it
         pass
 
-    # TODO: cooldown
-
     @observer_cmd.command(name="start")
     @commands.cooldown(1.0, 10.0)
     async def observer_start(self, ctx):
@@ -208,10 +213,10 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         # NOTE: check for is_running() only added in version 1.4.0
         if self.observe_system.get_task() is None:  # pylint: disable=no-member
             self.observe_system.start()  # pylint: disable=no-member
-            await ctx.send("Observer started")
+            await ctx.send(f"Observer started @`{self.local_machine_name}`")
         else:
             self.observe_system.restart()  # pylint: disable=no-member
-            await ctx.send("Observer restarted")
+            await ctx.send(f"Observer restarted @`{self.local_machine_name}`")
 
     @observer_cmd.command(name="stop")
     @commands.cooldown(1.0, 10.0)
@@ -219,7 +224,7 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         """Stops the background system observer."""
         self.observe_system.cancel()  # pylint: disable=no-member
         self.reset_notifications()
-        await ctx.send("Observer stopped")
+        await ctx.send(f"Observer stopped @`{self.local_machine_name}`")
 
     @observer_cmd.command(name="status")
     @commands.cooldown(1.0, 10.0)
@@ -324,7 +329,116 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         await ctx.send(message)
 
 
-def run_observer(token, channel_id):
+# ---------------------------------------------------------------------------
+
+
+class SystemStatsCollectorCog(commands.Cog, name="System Statistics Collector"):
+    def __init__(self, bot, channel_id):
+        self.bot = bot
+        self.channel_id = channel_id
+        self.local_machine_name = get_local_machine_name()
+
+        # for a total of a week
+        #   10 / 60 how often per minute,
+        #     times minutes in hour, hours in day, days in week
+        num = 10 / 60 * 60 * 24 * 7
+        self.stats = deque(maxlen=round(num))
+
+    @tasks.loop(seconds=10.0)
+    async def collect_stats(self):
+        LOGGER.debug("Running collect system stats task loop ...")
+
+        async with self.bot.get_channel(self.channel_id).typing():
+            # collect stats
+            try:
+                cur_stats = _collect_stats(include=("cpu", "disk", "gpu"))
+                if self.stats:
+                    cur_stats["_id"] = self.stats[-1]["_id"] + 1
+                self.stats.append(cur_stats)
+            except Exception as ex:  # pylint: disable=broad-except
+                LOGGER.debug(f"Failed to collect stats, reason: {ex}")
+
+    @collect_stats.before_loop
+    async def before_collect_stats_start(self):
+        LOGGER.debug("Wait for observer bot to be ready ...")
+        await self.bot.wait_until_ready()
+
+    @commands.group(name="collector", invoke_without_command=False)
+    async def collector_cmd(
+        self, ctx, name: typing.Optional[SelfOrAllName] = SelfOrAllName("*"),
+    ):
+        """Management commands, like start/stop/status ...
+
+        Optionally supply the name of the local machine to filter
+        command execution. Beware for machine names that are the
+        same as sub command names."""
+
+    @collector_cmd.command(name="start")
+    @commands.cooldown(1.0, 10.0)
+    async def collector_start(self, ctx):
+        """Starts the background system statistics collector loop."""
+        # NOTE: check for is_running() only added in version 1.4.0
+        if self.collect_stats.get_task() is None:  # pylint: disable=no-member
+            self.collect_stats.start()  # pylint: disable=no-member
+            await ctx.send(f"Collector started @`{self.local_machine_name}`")
+        else:
+            self.collect_stats.restart()  # pylint: disable=no-member
+            await ctx.send(f"Collector restarted @`{self.local_machine_name}`")
+
+    @collector_cmd.command(name="stop")
+    @commands.cooldown(1.0, 10.0)
+    async def collector_stop(self, ctx):
+        """Stops the background system statistics collector."""
+        self.collect_stats.cancel()  # pylint: disable=no-member
+        await ctx.send(f"Collector stopped @`{self.local_machine_name}`")
+
+    @collector_cmd.command(name="plot")
+    @commands.cooldown(1.0, 10.0)
+    async def collector_plot(self, ctx):
+        """Plots collected stats."""
+        if not self.stats:
+            await ctx.send(f"N/A @`{self.local_machine_name}`")
+            return
+
+        series = stats2rows(self.stats)
+
+        plot_bytes = plot_rows(series, as_data_uri=False)
+
+        dfile = discord.File(
+            BytesIO(plot_bytes),
+            filename=f"plot-{datetime.datetime.now(datetime.timezone.utc)}.png",
+        )
+
+        await ctx.send(f"Plot @`{self.local_machine_name}`", file=dfile)
+
+
+# ---------------------------------------------------------------------------
+
+
+class GeneralCommandsCog(commands.Cog, name="General"):
+    def __init__(self, bot):
+        self.bot = bot
+        self.local_machine_name = get_local_machine_name()
+
+    @commands.command()
+    async def ping(self, ctx):
+        """Standard Ping-Pong latency/is-alive test."""
+        await ctx.send(
+            f"Pong (latency: {self.bot.latency * 1000:.1f} ms) @`{self.local_machine_name}`"
+        )
+
+    @commands.command()
+    async def info(self, ctx):
+        """Query local system information and send it back."""
+        embed = make_sysinfo_embed()
+        await ctx.send(embed=embed)
+
+
+# ---------------------------------------------------------------------------
+
+
+def run_observer_old(token, channel_id):
+    """Functional variant, using decorators."""
     observer_bot = commands.Bot(command_prefix=".")
 
     @observer_bot.event
@@ -364,7 +478,48 @@ def run_observer(token, channel_id):
         await ctx.send(embed=embed)
 
     observer_bot.add_cog(SystemResourceObserverCog(observer_bot, channel_id))
+    observer_bot.add_cog(SystemStatsCollectorCog(observer_bot, channel_id))
 
+    LOGGER.info("Start observer bot ...")
+    observer_bot.run(token)
+    LOGGER.info("Quit observer bot.")
+
+
+# ---------------------------------------------------------------------------
+
+
+class ObserverBot(commands.Bot):
+    def __init__(self, *args, channel_id=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.channel_id = channel_id
+
+        self.add_cog(GeneralCommandsCog(self))
+        self.add_cog(SystemResourceObserverCog(self, channel_id))
+        self.add_cog(SystemStatsCollectorCog(self, channel_id))
+
+    async def on_ready(self):
+        LOGGER.info(f"Logged on as {self.user}")
+        LOGGER.debug(f"name: {self.user.name}, id: {self.user.id}")
+
+        if self.channel_id is not None:
+            channel = self.get_channel(self.channel_id)
+            LOGGER.info(f"Channel: {channel} {type(channel)} {repr(channel)}")
+            await channel.send(
+                f"Running observer bot on `{get_local_machine_name()}`...\n"
+                f"Type `{self.command_prefix}help` to display available commands."
+            )
+
+        await self.change_presence(status=discord.Status.idle)
+
+    async def on_disconnect(self):
+        LOGGER.warning(f"Bot {self.user} disconnected!")
+
+
+# ---------------------------------------------------------------------------
+
+
+def run_observer(token, channel_id):
+    observer_bot = ObserverBot(channel_id=channel_id, command_prefix=".")
     LOGGER.info("Start observer bot ...")
     observer_bot.run(token)
     LOGGER.info("Quit observer bot.")

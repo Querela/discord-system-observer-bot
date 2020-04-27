@@ -8,7 +8,7 @@ def load_content(filename):
 
 setup(
     name="discord-system-observer-bot",
-    version="0.0.1",
+    version="0.0.2",
     license="MIT License",
     author="Erik Körner",
     author_email="koerner@informatik.uni-leipzig.de",

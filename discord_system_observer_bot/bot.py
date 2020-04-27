@@ -1,5 +1,6 @@
 import datetime
 import logging
+import typing
 from collections import defaultdict
 
 import discord
@@ -74,6 +75,28 @@ def make_sysinfo_embed(cpu=True, disk=True, gpu=True):
 
 
 # ---------------------------------------------------------------------------
+
+
+class SelfOrAllName:
+    """Discord Type Converter. Checks whether the local machine
+    name is star '*' or the actual name. If not raise BadArgument
+    to abort subcommand execution."""
+
+    def __init__(self, name):
+        self._name = name
+
+    @classmethod
+    async def convert(cls, ctx, argument):  # pylint: disable=unused-argument
+        if argument not in ("*", get_local_machine_name()):
+            raise commands.BadArgument()
+        return cls(argument)
+
+    @property
+    def name(self):
+        return self._name
+
+    def __str__(self):
+        return self._name
 
 
 class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
@@ -154,8 +177,32 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
     def cog_unload(self):
         self.observe_system.cancel()  # pylint: disable=no-member
 
-    @commands.command(name="observer-start")
-    async def start(self, ctx):
+    @commands.group(name="observer", invoke_without_command=False)
+    async def observer_cmd(
+        self, ctx, name: typing.Optional[SelfOrAllName] = SelfOrAllName("*"),
+    ):
+        """Observer management commands, like start/stop/status ...
+
+        Optionally supply the name of the local machine to filter
+        command execution. Beware for machine names that are the
+        same as sub command names."""
+        # if ctx.invoked_subcommand is None:
+        # on invalid name fall back to default ("*"), but no sub-command
+        # await ctx.send(f"Name provided: {name}")
+        # if no name provided or wrong name, it would fall back to
+        # sending help. We would need an additional attribute for checking.
+        # await ctx.send_help(ctx.command)
+
+    @observer_cmd.error
+    async def observer_cmd_error(self, ctx, error):
+        # seems not to really matter, i think
+        # did not observe any calls to it
+        pass
+
+    # TODO: cooldown
+
+    @observer_cmd.command(name="start")
+    async def observer_start(self, ctx):
         """Starts the background system observer loop."""
         # NOTE: check for is_running() only added in version 1.4.0
         if self.observe_system.get_task() is None:  # pylint: disable=no-member
@@ -165,15 +212,15 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
             self.observe_system.restart()  # pylint: disable=no-member
             await ctx.send("Observer restarted")
 
-    @commands.command(name="observer-stop")
-    async def stop(self, ctx):
+    @observer_cmd.command(name="stop")
+    async def observer_stop(self, ctx):
         """Stops the background system observer."""
         self.observe_system.cancel()  # pylint: disable=no-member
         self.reset_notifications()
         await ctx.send("Observer stopped")
 
-    @commands.command(name="observer-status")
-    async def status(self, ctx):
+    @observer_cmd.command(name="status")
+    async def observer_status(self, ctx):
         """Displays statistics about notifications etc."""
 
         if not self.stats:
@@ -211,6 +258,8 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         )
 
         await ctx.send(message)
+
+    # TODO: current limit + badness output
 
 
 def run_observer(token, channel_id):

@@ -99,7 +99,7 @@ def get_disk_info() -> str:
             )
         )
 
-    info = make_table(headers, rows)
+    info = make_table(rows, headers)
 
     return info
 

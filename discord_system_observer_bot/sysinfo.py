@@ -1,29 +1,33 @@
 import os
 import time
+import typing
 from datetime import timedelta
 
 import psutil
 from psutil._common import bytes2human
 
 
+Percentage100Type = float
+SizeGBType = float
+
 # ---------------------------------------------------------------------------
 
 
-def _get_loadavg():
+def _get_loadavg() -> typing.List[Percentage100Type]:
     return [x / psutil.cpu_count() * 100 for x in psutil.getloadavg()]
 
 
-def _get_mem_util():
+def _get_mem_util() -> Percentage100Type:
     mem = psutil.virtual_memory()
     return mem.used / mem.total * 100
 
 
-def _get_mem_used():
+def _get_mem_used() -> SizeGBType:
     mem = psutil.virtual_memory()
     return mem.used / 1024 ** 3
 
 
-def get_disk_list():
+def get_disk_list() -> typing.List:
     return [
         disk
         for disk in psutil.disk_partitions(all=False)
@@ -31,24 +35,24 @@ def get_disk_list():
     ]
 
 
-def _get_disk_paths():
+def _get_disk_paths() -> typing.List[str]:
     disks = get_disk_list()
     paths = [disk.mountpoint for disk in disks]
     return paths
 
 
-def _get_disk_usage(path):
+def _get_disk_usage(path: str) -> Percentage100Type:
     return psutil.disk_usage(path).percent
 
 
-def _get_disk_free_gb(path):
-    return psutil.disk_usage(path).free / 1024 / 1024 / 1024
+def _get_disk_free_gb(path: str) -> SizeGBType:
+    return psutil.disk_usage(path).free / 1024 ** 3
 
 
 # ---------------------------------------------------------------------------
 
 
-def get_cpu_info():
+def get_cpu_info() -> str:
     meminfo = psutil.virtual_memory()
     GB_div = 1024 ** 3  # pylint: disable=invalid-name
 
@@ -72,7 +76,7 @@ def get_cpu_info():
     return info
 
 
-def get_disk_info():
+def get_disk_info() -> str:
     info = ""
 
     disks = get_disk_list()
@@ -143,7 +147,7 @@ def get_disk_info():
     return info
 
 
-def get_local_machine_name():
+def get_local_machine_name() -> str:
     return os.uname().nodename
 
 

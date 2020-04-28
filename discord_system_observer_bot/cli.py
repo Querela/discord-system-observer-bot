@@ -92,6 +92,9 @@ def parse_args(args=None):
     parser.add_argument(
         "-d", "--debug", action="store_true", help="Enable debug logging"
     )
+    parser.add_argument(
+        "-n", "--name", type=str, default=None, help="Local machine name (id)"
+    )
 
     args = parser.parse_args(args)
     return args
@@ -120,7 +123,7 @@ def main(args=None):
     LOGGER.debug(f"Run bot with configs: {configs}")
 
     try:
-        run_observer(configs["token"], configs["channel"])
+        run_observer(configs["token"], configs["channel"], name=args.name)
     except:  # pylint: disable=bare-except
         sys.exit(1)
 

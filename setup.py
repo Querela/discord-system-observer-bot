@@ -35,6 +35,7 @@ setup(
         "gpu": ["gputil"],
         "plot": ["matplotlib"],
         "dev": ["black", "pylint", "wheel", "twine"],
+        "doc": ["pdoc3"],
     },
     entry_points={
         "console_scripts": ["dbot-observe = discord_system_observer_bot.cli:main"]

@@ -1,7 +1,9 @@
+import typing
 
 
 try:
     import GPUtil
+
     _HAS_GPU = True
 except ImportError:
     _HAS_GPU = False
@@ -10,14 +12,30 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def get_gpus():
+def get_gpus() -> typing.List[GPUtil.GPU]:
+    """Return a list of ``GPUtil.GPU`` objects. Empty if none found.
+
+    Returns
+    -------
+    typing.List[GPUtil.GPU]
+        List of GPU info objects. Empty if none found.
+    """
     return GPUtil.getGPUs()
 
 
 # ---------------------------------------------------------------------------
 
 
-def get_gpu_info():
+def get_gpu_info() -> typing.Optional[str]:
+    """Generates a summary about GPU status.
+
+    Returns
+    -------
+    typing.Optional[str]
+        ``None`` if no GPU support else a simple markdown formatted
+        string.
+    """
+
     if not _HAS_GPU:
         return None
 

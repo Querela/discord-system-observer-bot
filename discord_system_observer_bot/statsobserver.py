@@ -1,4 +1,5 @@
 import datetime
+import typing
 from base64 import b64encode
 from collections import defaultdict, namedtuple
 from functools import lru_cache, partial
@@ -21,7 +22,7 @@ from discord_system_observer_bot.sysinfo import (
 
 
 @lru_cache(maxsize=1)
-def has_extra_deps_gpu():
+def has_extra_deps_gpu() -> bool:
     try:
         import GPUtil  # pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
@@ -30,7 +31,7 @@ def has_extra_deps_gpu():
 
 
 @lru_cache(maxsize=1)
-def has_extra_deps_plot():
+def has_extra_deps_plot() -> bool:
     try:
         import matplotlib  # pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
@@ -41,10 +42,9 @@ def has_extra_deps_plot():
 # ---------------------------------------------------------------------------
 
 
-# TODO: refactor disk path gathering (used above/below)
-
-
-def collect_stats(include=("cpu", "disk", "gpu")):
+def collect_stats(
+    include: typing.Set[str] = ("cpu", "disk", "gpu")
+) -> typing.Dict[str, typing.Union[float, int]]:
     stats = dict()
 
     stats["_id"] = 0
@@ -75,7 +75,9 @@ def collect_stats(include=("cpu", "disk", "gpu")):
     return stats
 
 
-def stats2rows(stats_list):
+def stats2rows(
+    stats_list: typing.List[typing.Dict[str, typing.Union[float, int]]]
+) -> typing.Optional[typing.Tuple[typing.Tuple[str, typing.List]]]:
     if not stats_list:
         return None
     names = tuple(stats_list[0].keys())
@@ -85,7 +87,9 @@ def stats2rows(stats_list):
     return tuple(zip(names, series))
 
 
-def plot_rows(data_series, as_data_uri=True):
+def plot_rows(
+    data_series: typing.Tuple[typing.Tuple[str, typing.List]], as_data_uri: bool = True
+) -> typing.Optional[typing.Union[str, bytes]]:
     if not has_extra_deps_plot():
         return None
 
@@ -163,41 +167,37 @@ def plot_rows(data_series, as_data_uri=True):
 # ---------------------------------------------------------------------------
 
 
-ObservableLimit = namedtuple(
-    "ObservableLimit",
-    (
-        #: visible name of the check/limit/...
-        "name",
-        #: function that returns a numeric value
-        "fn_retrieve",
-        #: function that get current and threshold value (may be ignored)
-        #: and returns True if current value is ok
-        "fn_check",
-        #: threshold, numeric (for visibility purposes)
-        "threshold",
-        #: message to send if check failed (e. g. resource exhausted)
-        "message",
-        #: badness increment for each failed check, None for default
-        #: can be smaller than threshold to allow for multiple consecutive failed checks
-        #: or same as threshold to immediatly notify
-        "badness_inc",
-        #: badness threshold if reached, a message is sent, None for default
-        #: allows for fluctuations until message is sent
-        "badness_threshold",
-    ),
-)
+class ObservableLimit(typing.NamedTuple):
+    #: visible name of the check/limit/...
+    name: str
+    #: function that returns a numeric value
+    fn_retrieve: typing.Callable[[], float]
+    #: function that get current and threshold value (may be ignored)
+    #: and returns True if current value is ok
+    fn_check: typing.Callable[[float, float], bool]
+    #: threshold, numeric (for visibility purposes)
+    threshold: float
+    #: message to send if check failed (e. g. resource exhausted)
+    message: str
+    #: badness increment for each failed check, None for default
+    #: can be smaller than threshold to allow for multiple consecutive failed checks
+    #: or same as threshold to immediatly notify
+    badness_inc: typing.Optional[int] = 1
+    #: badness threshold if reached, a message is sent, None for default
+    #: allows for fluctuations until message is sent
+    badness_threshold: typing.Optional[int] = 3
 
 
 class BadCounterManager:
     """Manager that gathers badness values for keys with
     individual thresholds and increments."""
 
-    def __init__(self, default_threshold=3, default_increase=3):
+    def __init__(self, default_threshold: int = 3, default_increase: int = 3):
         self.bad_counters = defaultdict(int)
         self.default_increase = default_increase
         self.default_threshold = default_threshold
 
-    def reset(self, name=None):
+    def reset(self, name: typing.Optional[str] = None) -> None:
         """Reset counters etc. to normal/default levels."""
         if name is not None:
             self.bad_counters[name] = 0
@@ -205,7 +205,7 @@ class BadCounterManager:
             for name_ in self.bad_counters.keys():
                 self.bad_counters[name_] = 0
 
-    def increase_counter(self, name, limit):
+    def increase_counter(self, name: str, limit: ObservableLimit) -> bool:
         """Increse the badness level and return True if threshold reached."""
         bad_threshold = (
             limit.badness_threshold
@@ -223,14 +223,14 @@ class BadCounterManager:
 
         return self.threshold_reached(name, limit)
 
-    def decrease_counter(self, name):
+    def decrease_counter(self, name: str) -> bool:
         """Decrease the badness counter and return True if normal."""
         if self.bad_counters[name] > 0:
             self.bad_counters[name] = max(0, self.bad_counters[name] - 1)
 
         return self.is_normal(name)
 
-    def threshold_reached(self, name, limit):
+    def threshold_reached(self, name: str, limit: ObservableLimit) -> bool:
         """Return True if the badness counter has reached the threshold."""
         bad_threshold = (
             limit.badness_threshold
@@ -240,7 +240,7 @@ class BadCounterManager:
 
         return self.bad_counters[name] >= bad_threshold
 
-    def is_normal(self, name):
+    def is_normal(self, name: str) -> bool:
         """Return True if the badness counter is zero/normal."""
         return self.bad_counters[name] == 0
 
@@ -248,13 +248,13 @@ class BadCounterManager:
 class NotifyBadCounterManager(BadCounterManager):
     """Manager that collects badness values and notification statuses."""
 
-    def __init__(self, default_threshold=3, default_increase=3):
+    def __init__(self, default_threshold: int = 3, default_increase: int = 3):
         super().__init__(
             default_threshold=default_threshold, default_increase=default_increase
         )
         self.notified = defaultdict(bool)
 
-    def reset(self, name=None):
+    def reset(self, name: typing.Optional[str] = None) -> None:
         super().reset(name=name)
 
         if name is not None:
@@ -263,7 +263,7 @@ class NotifyBadCounterManager(BadCounterManager):
             for name_ in self.notified.keys():
                 self.notified[name_] = False
 
-    def decrease_counter(self, name):
+    def decrease_counter(self, name: str) -> bool:
         """Decrease the counter and reset the notification flag
         if the normal level has been reached.
         Returns True on change from non-normal to normal
@@ -277,7 +277,7 @@ class NotifyBadCounterManager(BadCounterManager):
         # additionally require a limit exceeded message to be sent, else ignore the change
         return was_normal_before != is_normal and has_notified_before
 
-    def should_notify(self, name, limit):
+    def should_notify(self, name: str, limit: ObservableLimit) -> bool:
         """Return True if a notification should be sent."""
         if not self.threshold_reached(name, limit):
             return False
@@ -287,7 +287,7 @@ class NotifyBadCounterManager(BadCounterManager):
 
         return True
 
-    def mark_notified(self, name):
+    def mark_notified(self, name: str) -> None:
         """Mark this counter as already notified."""
         self.notified[name] = True
 
@@ -295,7 +295,7 @@ class NotifyBadCounterManager(BadCounterManager):
 # ---------------------------------------------------------------------------
 
 
-def make_observable_limits():
+def make_observable_limits() -> typing.Dict[str, ObservableLimit]:
     limits = dict()
 
     limits["cpu_load_5min"] = ObservableLimit(

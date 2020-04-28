@@ -1,5 +1,6 @@
 import typing
 
+from discord_system_observer_bot.utils import make_table
 
 try:
     import GPUtil
@@ -26,6 +27,41 @@ def get_gpus() -> typing.List[GPUtil.GPU]:
 # ---------------------------------------------------------------------------
 
 
+class NoGPUException(Exception):
+    pass
+
+
+def _get_gpu(gpu_id):
+    for gpu in get_gpus():
+        if gpu.id == gpu_id:
+            return gpu
+    return None
+
+
+def _get_gpu_util(gpu_id):
+    gpu = _get_gpu(gpu_id)
+    if gpu is None:
+        raise NoGPUException()
+    return round(gpu.load * 100)
+
+
+def _get_gpu_mem_load(gpu_id):
+    gpu = _get_gpu(gpu_id)
+    if gpu is None:
+        raise NoGPUException()
+    return round(gpu.memoryUtil * 100, 1)
+
+
+def _get_gpu_temp(gpu_id):
+    gpu = _get_gpu(gpu_id)
+    if gpu is None:
+        raise NoGPUException()
+    return round(gpu.temperature, 1)
+
+
+# ---------------------------------------------------------------------------
+
+
 def get_gpu_info() -> typing.Optional[str]:
     """Generates a summary about GPU status.
 
@@ -39,10 +75,9 @@ def get_gpu_info() -> typing.Optional[str]:
     if not _HAS_GPU:
         return None
 
-    rows = list()
-    fields = ["ID", "Util", "Mem", "Temp", "Memory (Used)"]  # , "Name"]
-    rows.append(fields)
+    headers = ("ID", "Util", "Mem", "Temp", "Memory (Used)")  # , "Name")
 
+    rows = list()
     for gpu in GPUtil.getGPUs():
         fields = [
             f"{gpu.id}",
@@ -54,42 +89,7 @@ def get_gpu_info() -> typing.Optional[str]:
         ]
         rows.append(fields)
 
-    lengths = [
-        max(len(row[field_idx]) for row in rows) for field_idx in range(len(rows[0]))
-    ]
-
-    info = (
-        "```\n"
-        + "\n".join(
-            # header
-            [
-                # "| " +
-                " | ".join(
-                    [
-                        f"{field:{field_len}s}"
-                        for field, field_len in zip(rows[0], lengths)
-                    ]
-                )
-                # + " |"
-            ]
-            # separator
-            + [
-                # "| " +
-                " | ".join(["-" * field_len for field_len in lengths])
-                # + " |"
-            ]
-            # rows
-            + [
-                # "| " +
-                " | ".join(
-                    [f"{field:>{field_len}s}" for field, field_len in zip(row, lengths)]
-                )
-                # + " |"
-                for row in rows[1:]
-            ]
-        )
-        + "\n```"
-    )
+    info = make_table(rows, headers)
 
     return info
 

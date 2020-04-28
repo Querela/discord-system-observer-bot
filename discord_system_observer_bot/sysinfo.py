@@ -6,9 +6,12 @@ from datetime import timedelta
 import psutil
 from psutil._common import bytes2human
 
+from discord_system_observer_bot.utils import make_table
+
 
 Percentage100Type = float
 SizeGBType = float
+
 
 # ---------------------------------------------------------------------------
 
@@ -77,11 +80,10 @@ def get_cpu_info() -> str:
 
 
 def get_disk_info() -> str:
-    info = ""
-
     disks = get_disk_list()
 
-    header = ("Device", "Mount", "Use", "Total", "Used", "Free")
+    headers = ("Device", "Mount", "Use", "Total", "Used", "Free")
+
     rows = list()
     for disk in disks:
         usage = psutil.disk_usage(disk.mountpoint)
@@ -97,52 +99,7 @@ def get_disk_info() -> str:
             )
         )
 
-    lengths = [
-        max(len(row[field_idx]) for row in [header] + rows)
-        for field_idx in range(len(rows[0]))
-    ]
-
-    info = (
-        "```\n"
-        + "\n".join(
-            # header
-            [
-                # "| " +
-                " | ".join(
-                    [
-                        f"{field:{field_len}s}"
-                        for field, field_len in zip(header, lengths)
-                    ]
-                )
-                # + " |"
-            ]
-            # separator
-            + [
-                # "| " +
-                " | ".join(["-" * field_len for field_len in lengths])
-                # + " |"
-            ]
-            # rows
-            + [
-                # "| " +
-                " | ".join(
-                    # text fields
-                    [
-                        f"{field:<{field_len}s}"
-                        for field, field_len in list(zip(row, lengths))[:2]
-                    ]
-                    # values/number
-                    + [
-                        f"{field:>{field_len}s}"
-                        for field, field_len in list(zip(row, lengths))[2:]
-                    ]
-                )
-                # + " |"
-                for row in rows
-            ]
-        )
-        + "\n```"
-    )
+    info = make_table(headers, rows)
 
     return info
 

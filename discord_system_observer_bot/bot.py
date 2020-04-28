@@ -12,10 +12,14 @@ from discord_system_observer_bot.statsobserver import collect_stats as _collect_
 from discord_system_observer_bot.statsobserver import stats2rows
 from discord_system_observer_bot.statsobserver import plot_rows
 from discord_system_observer_bot.statsobserver import has_extra_deps_gpu
-from discord_system_observer_bot.statsobserver import make_observable_limits
-from discord_system_observer_bot.statsobserver import NotifyBadCounterManager
+from discord_system_observer_bot.statsobserver import (
+    make_observable_limits,
+    LimitTypesSetType,
+    NotifyBadCounterManager,
+)
 from discord_system_observer_bot.sysinfo import get_local_machine_name
 from discord_system_observer_bot.sysinfo import get_cpu_info, get_disk_info
+from discord_system_observer_bot.utils import make_table, dump_dict_kv
 
 
 LOGGER = logging.getLogger(__name__)
@@ -51,7 +55,10 @@ def set_name(name: str) -> None:
     name : str
         the name of the machine/system the bot runs on
     """
-    global _LOCAL_MACHINE_NAME
+    global _LOCAL_MACHINE_NAME  # pylint: disable=global-statement
+    # NOTE: using global here is the easiest solution
+    #       compared to creating a class for storing and accessing
+    #       a single variable ...
     _LOCAL_MACHINE_NAME = name
 
 
@@ -157,18 +164,18 @@ class SelfOrAllName:
 
 
 class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
-    def __init__(self, bot: "ObserverBot"):
+    def __init__(self, bot: "ObserverBot", limits_types: LimitTypesSetType = None):
         self.bot = bot
 
         self.limits = dict()
         self.bad_checker = NotifyBadCounterManager()
         self.stats = defaultdict(int)
 
-        self.init_limits()
+        self.init_limits(limits_types=limits_types)
 
-    def init_limits(self):
+    def init_limits(self, limits_types: LimitTypesSetType = None):
         # TODO: pack them in an optional file (like Flask configs) and try to load else nothing.
-        self.limits.update(make_observable_limits())
+        self.limits.update(make_observable_limits(include=limits_types))
 
     def reset_notifications(self):
         self.bad_checker.reset()
@@ -206,7 +213,9 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
                 # check if already notified (that limit reached)
                 # even if shortly recovered but not completely, e. g. 3->2->3 >= 3 (thres) <= 0 (not completely reset)
                 await self.send(
-                    limit.message.format(cur_value=cur_value, threshold=limit.threshold)
+                    limit.message.format(
+                        cur_value=cur_value, threshold=limit.threshold, unit=limit.unit
+                    )
                     + f" @`{self.bot.local_machine_name}`"
                 )
                 self.bad_checker.mark_notified(name)
@@ -274,6 +283,13 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         self.reset_notifications()
         await ctx.send(f"Observer stopped @`{self.bot.local_machine_name}`")
 
+    def _header_for(self, name: str) -> str:
+        return (
+            f"**{name} for** `{self.bot.local_machine_name}`"  # pylint: disable=no-member
+            f""" [`{"running" if self.observe_system.next_iteration is not None else "stopped"}`]"""
+            "\n"
+        )
+
     @observer_cmd.command(name="status")
     @commands.cooldown(1.0, 10.0)
     async def observer_status(self, ctx):
@@ -282,13 +298,6 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
         if not self.stats:
             await ctx.send(f"N/A [`{self.bot.local_machine_name}`] [`not-started`]")
             return
-
-        len_keys = max(len(k) for k in self.stats.keys())
-        len_vals = max(
-            len(str(v))
-            for v in self.stats.values()
-            if isinstance(v, (int, float, bool))
-        )
 
         try:
             # pylint: disable=no-member
@@ -302,13 +311,8 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
 
         message = "".join(
             [
-                f"**Observer status for** `{self.bot.local_machine_name}`",
-                f""" [`{"running" if self.observe_system.next_iteration is not None else "stopped"}`]""",  # pylint: disable=no-member
-                "\n```\n",
-                "\n".join(
-                    [f"{k:<{len_keys}} {v:>{len_vals}}" for k, v in self.stats.items()]
-                ),
-                "\n```",
+                self._header_for("Observer status"),
+                dump_dict_kv(self.stats, wrap_markdown=True),
                 f"\nNext check in `{next_time}`",
             ]
         )
@@ -324,25 +328,28 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
             await ctx.send(f"N/A [`{self.bot.local_machine_name}`] [`not-started`]")
             return
 
-        len_keys = max(len(k) for k in self.bad_checker.bad_counters.keys())
-        len_vals = max(
-            len(str(v))
-            for v in self.bad_checker.bad_counters.values()
-            if isinstance(v, (int, float, bool))
-        )
-
         message = "".join(
             [
-                f"**Badness values for** `{self.bot.local_machine_name}`",
-                f""" [`{"running" if self.observe_system.next_iteration is not None else "stopped"}`]""",  # pylint: disable=no-member
-                "\n```\n",
-                "\n".join(
+                self._header_for("Badness values"),
+                # dump_dict_kv(self.bad_checker.bad_counters, wrap_markdown=True),
+                make_table(
                     [
-                        f"{k:<{len_keys}} {v:>{len_vals}}"
-                        for k, v in self.bad_checker.bad_counters.items()
-                    ]
+                        (
+                            v.name,
+                            self.bad_checker.bad_counters[k],
+                            v.badness_inc,
+                            v.badness_dec,
+                            v.badness_threshold,
+                            self.bad_checker.notified[k],
+                        )
+                        for k, v in self.limits.items()
+                    ],
+                    ("name", "badness", "inc", "dec", "max", "notified"),
+                    alignments=("<", ">", ">", ">", ">", ">"),
+                    wrap_markdown=True,
+                    header_separator=True,
+                    column_separators=False,
                 ),
-                "\n```",
             ]
         )
 
@@ -353,24 +360,34 @@ class SystemResourceObserverCog(commands.Cog, name="System Resource Observer"):
     async def observer_dump_limits(self, ctx):
         """Write out limits."""
 
-        len_keys = max(len(k) for k in self.limits.keys())
-        len_vals = 10
+        def _get_safe_current(limit):
+            try:
+                return limit.fn_retrieve()
+            except:  # pylint: disable=bare-except
+                return None
 
         message = "".join(
             [
-                f"**Limits for** `{self.bot.local_machine_name}`",
-                f""" [`{"running" if self.observe_system.next_iteration is not None else "stopped"}`]""",  # pylint: disable=no-member
-                "\n```\n",
-                f"""{"name":<{len_keys}} {"threshold":>{len_vals}} {"exceed?":>{len_vals}} {"notified":>{len_vals}}\n""",
-                "\n".join(
+                self._header_for("Limits"),
+                make_table(
                     [
-                        f"{k:<{len_keys}} {v.threshold:>{len_vals}} "
-                        f"{str(self.bad_checker.threshold_reached(k, v)):>{len_vals}} "
-                        f"{str(self.bad_checker.notified[k]):>{len_vals}}"
-                        for k, v in self.limits.items()
-                    ]
+                        (
+                            limit.name,
+                            # lid, "id"
+                            _get_safe_current(limit),
+                            limit.threshold,
+                            limit.unit,
+                            self.bad_checker.threshold_reached(lid, limit),
+                            self.bad_checker.notified[lid],
+                        )
+                        for lid, limit in self.limits.items()
+                    ],
+                    ("name", "current", "threshold", "unit", "exceed?", "notified"),
+                    alignments=("<", ">", ">", "<", ">", ">"),
+                    wrap_markdown=True,
+                    header_separator=True,
+                    column_separators=False,
                 ),
-                "\n```",
             ]
         )
 
@@ -484,7 +501,12 @@ class GeneralCommandsCog(commands.Cog, name="General"):
 
 class ObserverBot(commands.Bot):
     def __init__(
-        self, channel_id: int, *args, name: typing.Optional[str] = None, **kwargs,
+        self,
+        channel_id: int,
+        *args,
+        name: typing.Optional[str] = None,
+        limits_types: LimitTypesSetType = None,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.channel_id = channel_id
@@ -492,7 +514,7 @@ class ObserverBot(commands.Bot):
         self.local_machine_name = name or get_name()
 
         self.add_cog(GeneralCommandsCog(self))
-        self.add_cog(SystemResourceObserverCog(self))
+        self.add_cog(SystemResourceObserverCog(self, limits_types=limits_types))
         self.add_cog(SystemStatsCollectorCog(self))
 
     async def on_ready(self):
@@ -516,7 +538,10 @@ class ObserverBot(commands.Bot):
 
 
 def run_observer(
-    token: str, channel_id: int, name: typing.Optional[str] = None
+    token: str,
+    channel_id: int,
+    name: typing.Optional[str] = None,
+    limits_types: LimitTypesSetType = None,
 ) -> typing.NoReturn:
     """Starts the observer bot and blocks until finished.
 
@@ -528,13 +553,19 @@ def run_observer(
         Discord channel id
     name : typing.Optional[str], optional
         local machine name, used for filtering, by default None
+    limits_types : LimitTypesSetType or typing.Optional[typing.Set[str]], optional
+        Names of limit types that should be observed,
+        None would mean that only critical limits are used,
+        to disable all, use an empty set, by default None
     """
 
     if name:
         LOGGER.info(f"Set local machine name to: {name}")
         set_name(name)
 
-    observer_bot = ObserverBot(channel_id, name=name, command_prefix=".")
+    observer_bot = ObserverBot(
+        channel_id, name=name, limits_types=limits_types, command_prefix="."
+    )
     LOGGER.info("Start observer bot ...")
     observer_bot.run(token)
     LOGGER.info("Quit observer bot.")

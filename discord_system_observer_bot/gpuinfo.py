@@ -9,6 +9,14 @@ try:
 except ImportError:
     _HAS_GPU = False
 
+    # make dummy objects
+    class GPUtil:
+        class GPU:
+            pass
+
+        def getGPUs(self):
+            return []
+
 
 # ---------------------------------------------------------------------------
 

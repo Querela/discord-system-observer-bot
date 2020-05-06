@@ -11,7 +11,10 @@ from discord_system_observer_bot.gpuinfo import get_gpu_info
 from discord_system_observer_bot.statsobserver import collect_stats as _collect_stats
 from discord_system_observer_bot.statsobserver import stats2rows
 from discord_system_observer_bot.statsobserver import plot_rows
-from discord_system_observer_bot.statsobserver import has_extra_deps_gpu
+from discord_system_observer_bot.statsobserver import (
+    has_extra_deps_gpu,
+    has_extra_deps_plot,
+)
 from discord_system_observer_bot.statsobserver import (
     make_observable_limits,
     LimitTypesSetType,
@@ -463,9 +466,19 @@ class SystemStatsCollectorCog(commands.Cog, name="System Statistics Collector"):
             await ctx.send(f"N/A @`{self.bot.local_machine_name}`")
             return
 
+        if not has_extra_deps_plot():
+            await ctx.send(
+                f"N/A (missing plotting dependencies) @`{self.bot.local_machine_name}`"
+            )
+            return
+
         series = stats2rows(self.stats)
 
         plot_bytes = plot_rows(series, as_data_uri=False)
+
+        if plot_bytes is None:
+            await ctx.send(f"N/A (empty plot?) @`{self.bot.local_machine_name}`")
+            return
 
         dfile = discord.File(
             BytesIO(plot_bytes),

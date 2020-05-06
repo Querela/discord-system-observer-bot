@@ -95,6 +95,19 @@ Print help and available options:
 
    dbot-observe -h
 
+Output:
+
+.. code-block:: bash
+
+   usage: dbot-observe [-h] [-c CONFIG] [-d] [-n NAME]
+   
+   optional arguments:
+     -h, --help            show this help message and exit
+     -c CONFIG, --config CONFIG
+                           Config file
+     -d, --debug           Enable debug logging
+     -n NAME, --name NAME  Local machine name (id)
+
 Starting the observer bot (without actually starting the background observation, just waiting for a Discord message to start/stop etc.):
 
 .. code-block:: bash
